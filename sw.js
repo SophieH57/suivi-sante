@@ -1,5 +1,5 @@
 // Hors ligne : sert les fichiers depuis le cache, et les met à jour en arrière-plan.
-const CACHE = 'sante-v1';
+const CACHE = 'sante-v2';
 const FILES = ['./', 'index.html', 'app.js', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'sync.js', 'firebase-config.js'];
 
 self.addEventListener('install', e => {
