@@ -2,10 +2,10 @@
 
 Application web installable (PWA) pour noter en 1–2 taps les symptômes ressentis dans la journée.
 
-- Symptômes et médicaments favoris : un tap enregistre l'heure, contexte libre en option
+- Symptômes (par zone du corps), médicaments et sport : favoris en un tap, récents, ou saisie ponctuelle tapée à la main
 - Selles selon l'échelle de Bristol
 - Bilan du soir : sommeil, humeur, stress, cycle, activités, note
-- Calendrier du mois coloré (vert : aucun symptôme, orange : 1–2, rouge : 3 et plus), couleur modifiable à la main
+- Calendrier du mois coloré (vert : 0–2 symptômes, orange : 3–4, rouge : 5 et plus), couleur modifiable à la main
 - Fonctionne hors ligne ; données sur le téléphone, copie en ligne via Firebase (compte Google), export / restauration JSON
 
 Voir [PLAN.md](PLAN.md) pour le détail des choix.

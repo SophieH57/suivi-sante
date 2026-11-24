@@ -4,7 +4,7 @@
 // Les éléments retirés d'une liste gardent off: true, pour que l'historique affiche toujours leur nom.
 const KEY = 'sante-v1';
 const EMPTY = {
-  symptoms: [],   // { id, name, emoji, off? }
+  symptoms: [],   // { id, name, emoji, zone, off? }
   meds: [],       // { id, name, emoji, dose, off? }
   activities: [
     { id: 'yoga', name: 'Yoga', emoji: '🧘' },
@@ -14,8 +14,10 @@ const EMPTY = {
     { id: 'elliptique', name: 'Vélo elliptique', emoji: '🏋️' },
     { id: 'velo', name: "Vélo d'appartement", emoji: '🚴' },
   ],
-  // 'AAAA-MM-JJ' → { symptoms: [{ id, typeId, time, context }], meds: [{ id, medId, time, dose, note }],
+  // 'AAAA-MM-JJ' → { symptoms: [{ id, typeId, zone, time, context }], meds: [{ id, medId, time, dose, note }],
+  //                  sports: [{ id, actId, time, duration, note }],
   //                  stools: [{ id, bristol, time, note }], checkin: {…} | null, color: null | 'green' | 'orange' | 'red' }
+  // Saisie ponctuelle (hors liste des Réglages) : pas de typeId / medId / actId, mais { name, emoji? } dans la saisie.
   days: {},
 };
 let db = load();
@@ -23,7 +25,7 @@ let db = load();
 function load() {
   try { return { ...structuredClone(EMPTY), ...JSON.parse(localStorage.getItem(KEY)) }; } catch { return structuredClone(EMPTY); }
 }
-const isEmptyDay = d => !d.symptoms?.length && !d.meds?.length && !d.stools?.length && !d.checkin && !d.color;
+const isEmptyDay = d => !d.symptoms?.length && !d.meds?.length && !d.sports?.length && !d.stools?.length && !d.checkin && !d.color;
 function save() {
   for (const [k, d] of Object.entries(db.days)) if (isEmptyDay(d)) delete db.days[k];
   localStorage.setItem(KEY, JSON.stringify(db));
@@ -45,7 +47,7 @@ const num = v => v === null || v === '' ? null : +v;
 const peek = date => db.days[date] || {};   // lecture sans créer le jour
 const dayOf = date => {                      // crée le jour si besoin (les jours vides sont retirés à l'enregistrement)
   const d = db.days[date] ||= {};
-  d.symptoms ||= []; d.meds ||= []; d.stools ||= [];
+  d.symptoms ||= []; d.meds ||= []; d.sports ||= []; d.stools ||= [];
   d.checkin ??= null; d.color ??= null;
   return d;
 };
@@ -62,9 +64,31 @@ const BRISTOL = [
   'Liquide, sans morceaux',
 ];
 
+// Zones du corps : chaque symptôme de la liste en a une (sans zone → Général)
+const ZONES = [
+  { id: 'head', name: 'Tête / ORL', emoji: '🤕' },
+  { id: 'belly', name: 'Ventre / digestif', emoji: '🤢' },
+  { id: 'body', name: 'Thorax / dos / membres', emoji: '🦴' },
+  { id: 'general', name: 'Général / peau / moral', emoji: '🌡️' },
+];
+const zoneOf = s => s.zone || 'general';
+const zoneOptions = sel => ZONES.map(z => `<option value="${z.id}" ${z.id === sel ? 'selected' : ''}>${z.emoji} ${esc(z.name)}</option>`).join('');
+
+// Types de saisie : favori (élément de la liste des Réglages, relié par son id) ou ponctuel (nom tapé à la main)
+const KINDS = {
+  symptoms: { list: 'symptoms', idKey: 'typeId', emoji: '🤒', title: 'Symptôme' },
+  meds: { list: 'meds', idKey: 'medId', emoji: '💊', title: 'Médicament' },
+  sports: { list: 'activities', idKey: 'actId', emoji: '🏃', title: 'Sport' },
+};
+const BLANK = { symptoms: { context: '' }, meds: { dose: '', note: '' }, sports: { duration: null, note: '' } };
+function entryLabel(kind, e) {
+  const K = KINDS[kind];
+  return e[K.idKey] ? item(K.list, e[K.idKey]) : { name: e.name || '?', emoji: e.emoji || K.emoji };
+}
+
 // ---------- Couleur du jour ----------
 const COLOR_NAMES = { green: 'Vert', orange: 'Orange', red: 'Rouge' };
-const autoColor = d => { const n = d.symptoms?.length || 0; return n === 0 ? 'green' : n <= 2 ? 'orange' : 'red'; };
+const autoColor = d => { const n = d.symptoms?.length || 0; return n <= 2 ? 'green' : n <= 4 ? 'orange' : 'red'; };
 // Pas de couleur avant le premier jour noté ni dans le futur (sinon tout le passé serait « vert »)
 function colorOf(date) {
   const d = peek(date);
@@ -92,8 +116,9 @@ function checkinSummary(c) {
 
 function timeline(d) {
   const rows = [
-    ...(d.symptoms || []).map(e => { const s = item('symptoms', e.typeId); return { e, kind: 'symptoms', ico: s.emoji, label: s.name, text: e.context }; }),
-    ...(d.meds || []).map(e => { const m = item('meds', e.medId); return { e, kind: 'meds', ico: m.emoji, label: m.name + (e.dose ? ' · ' + e.dose : ''), text: e.note }; }),
+    ...(d.symptoms || []).map(e => { const s = entryLabel('symptoms', e); return { e, kind: 'symptoms', ico: s.emoji, label: s.name, text: e.context }; }),
+    ...(d.meds || []).map(e => { const m = entryLabel('meds', e); return { e, kind: 'meds', ico: m.emoji, label: m.name + (e.dose ? ' · ' + e.dose : ''), text: e.note }; }),
+    ...(d.sports || []).map(e => { const a = entryLabel('sports', e); return { e, kind: 'sports', ico: a.emoji, label: a.name + (e.duration ? ` · ${e.duration} min` : ''), text: e.note }; }),
     ...(d.stools || []).map(e => ({ e, kind: 'stools', ico: '💩', label: `Selles · type ${e.bristol}`, text: e.note || BRISTOL[e.bristol - 1] })),
   ].sort((a, b) => a.e.time.localeCompare(b.e.time));
   if (!rows.length) return '<p class="muted">Rien de noté pour ce jour.</p>';
@@ -106,7 +131,6 @@ function timeline(d) {
 
 function renderDay() {
   const date = day(), d = peek(date), isToday = !cur, c = colorOf(date);
-  const sy = active('symptoms'), md = active('meds');
   $('#v-day').innerHTML = `
     <div class="daynav">
       <button data-act="prev" aria-label="Jour précédent">‹</button>
@@ -116,15 +140,12 @@ function renderDay() {
       <button class="dot ${c}" data-act="color" aria-label="Couleur du jour">${d.color ? '✎' : ''}</button>
     </div>
 
-    <h2>Symptômes</h2>
-    ${sy.length ? `<div class="grid">${sy.map(s => `
-      <button class="tap" data-act="addsym" data-id="${s.id}"><span>${esc(s.emoji)}</span>${esc(s.name)}</button>`).join('')}</div>`
-    : `<p class="muted">Ta liste de symptômes est vide. <button class="link" data-view="settings">Ajouter dans Réglages</button></p>`}
-
-    <h2>Médicaments et selles</h2>
-    <div class="grid">${md.map(m => `
-      <button class="tap med" data-act="addmed" data-id="${m.id}"><span>${esc(m.emoji)}</span>${esc(m.name)}${m.dose ? `<small>${esc(m.dose)}</small>` : ''}</button>`).join('')}
-      <button class="tap stool" data-act="addstool"><span>💩</span>Selles</button>
+    <h2>Noter</h2>
+    <div class="grid home">
+      <button class="tap" data-act="pick" data-kind="symptoms"><span>🤒</span>Symptôme</button>
+      <button class="tap" data-act="pick" data-kind="meds"><span>💊</span>Médicament</button>
+      <button class="tap" data-act="pick" data-kind="sports"><span>🏃</span>Sport</button>
+      <button class="tap" data-act="addstool"><span>💩</span>Selles</button>
     </div>
 
     <button class="big checkin ${d.checkin ? 'done' : ''}" data-act="checkin">🌙 Bilan du soir${d.checkin ? ' ✓' : ''}</button>
@@ -139,8 +160,10 @@ let dlgOk = null;
 function openDlg(html, onOk) {
   $('#dform').innerHTML = html;
   dlgOk = onOk;
-  $('#dlg').showModal();
+  if (!$('#dlg').open) $('#dlg').showModal();
+  else $('#dform [autofocus]')?.focus(); // déjà ouverte (contenu remplacé) : showModal ne place pas le curseur
 }
+const closeBar = '<div class="actions"><button type="button" data-act="dlgclose">Fermer</button></div>';
 // Seul « Enregistrer » est un bouton d'envoi : la touche Entrée ne peut pas déclencher « Supprimer »
 const actions = del => `<div class="actions">
   ${del ? '<button type="button" class="danger" data-act="dlgdel">Supprimer</button>' : ''}
@@ -174,7 +197,7 @@ function addEntry(kind, entry) {
   dayOf(date)[kind].push(e);
   save(); render();
   if (cur) return openEdit(date, kind, e.id); // jour passé : on règle l'heure tout de suite
-  const label = kind === 'symptoms' ? item('symptoms', e.typeId) : item('meds', e.medId);
+  const label = entryLabel(kind, e);
   toast(`${label.emoji} ${label.name} · ${e.time}`, [
     ['✏️ Détails', () => openEdit(date, kind, e.id)],
     ['↶ Annuler', () => { removeEntry(date, kind, e.id); save(); render(); }],
@@ -186,16 +209,29 @@ function removeEntry(date, kind, id) {
   if (d[kind]) d[kind] = d[kind].filter(x => x.id !== id);
 }
 
+// Titre de la fiche : nom du favori, ou nom + emoji modifiables pour une saisie ponctuelle
+function entryHead(kind, e) {
+  const K = KINDS[kind];
+  if (e[K.idKey]) { const x = item(K.list, e[K.idKey]); return `<h2>${esc(x.emoji)} ${esc(x.name)}</h2>`; }
+  return `<h2>${K.emoji} ${K.title} ponctuel</h2>
+    <div class="row"><label class="emoji-l">Emoji<input name="emoji" value="${esc(e.emoji)}" placeholder="${K.emoji}"></label>
+      <label>Nom<input name="name" value="${esc(e.name)}" required ${e.name ? '' : 'autofocus'}></label></div>`;
+}
+
 function entryFields(kind, e) {
   if (kind === 'symptoms') {
-    const s = item('symptoms', e.typeId);
-    return `<h2>${esc(s.emoji)} ${esc(s.name)}</h2>
+    return `${entryHead(kind, e)}
+      ${e.typeId ? '' : `<label>Zone<select name="zone">${zoneOptions(zoneOf(e))}</select></label>`}
       <label>Contexte<textarea name="context" rows="3" placeholder="Intensité, durée, repas, température…">${esc(e.context)}</textarea></label>`;
   }
   if (kind === 'meds') {
-    const m = item('meds', e.medId);
-    return `<h2>${esc(m.emoji)} ${esc(m.name)}</h2>
-      <label>Dose<input name="dose" value="${esc(e.dose)}"></label>
+    return `${entryHead(kind, e)}
+      <label>Dose<input name="dose" value="${esc(e.dose)}" placeholder="Facultatif"></label>
+      <label>Note<textarea name="note" rows="2">${esc(e.note)}</textarea></label>`;
+  }
+  if (kind === 'sports') {
+    return `${entryHead(kind, e)}
+      <label>Durée (minutes)<input name="duration" type="number" min="0" max="1440" inputmode="numeric" value="${e.duration ?? ''}" placeholder="Facultatif"></label>
       <label>Note<textarea name="note" rows="2">${esc(e.note)}</textarea></label>`;
   }
   return `<h2>💩 Selles — échelle de Bristol</h2>
@@ -216,11 +252,96 @@ function openEdit(date, kind, id, entry = null) {
     else {
       const v = Object.fromEntries(fd);
       if (v.bristol) v.bristol = +v.bristol;
-      for (const k of ['context', 'note', 'dose']) if (k in v) v[k] = v[k].trim();
+      if ('duration' in v) v.duration = num(v.duration);
+      for (const k of ['context', 'note', 'dose', 'name', 'emoji']) if (k in v) v[k] = v[k].trim();
       const list = dayOf(date)[kind], i = list.findIndex(x => x.id === e.id);
       const next = { ...e, ...v };
+      if (!next.emoji) delete next.emoji;
+      linkFavorite(kind, next);
       if (i < 0) list.push(next); else list[i] = next;
     }
+    save(); render();
+  });
+}
+
+// Nom tapé à la main = nom d'un favori : la saisie est reliée au favori
+function linkFavorite(kind, e) {
+  const K = KINDS[kind];
+  if (!K || e[K.idKey] || !e.name) return;
+  const fav = active(K.list).find(o => o.name.toLowerCase() === e.name.toLowerCase());
+  if (!fav) return;
+  e[K.idKey] = fav.id;
+  delete e.name; delete e.emoji;
+  if (kind === 'symptoms') e.zone = zoneOf(fav);
+  if (kind === 'meds' && !e.dose) e.dose = fav.dose || '';
+}
+
+// ---------- Choix : favoris, récents, « Autre… » ----------
+let picker = null; // fenêtre de choix ouverte : { kind, zone, rec }
+
+// 5 dernières saisies ponctuelles (noms différents, hors favoris), de la zone demandée pour les symptômes
+function recents(kind, zone) {
+  const K = KINDS[kind], favs = new Set(active(K.list).map(x => x.name.toLowerCase())), seen = new Map();
+  for (const date of Object.keys(db.days).sort().reverse()) {
+    const list = [...(db.days[date][kind] || [])].sort((a, b) => b.time.localeCompare(a.time));
+    for (const e of list) {
+      const k = e.name?.toLowerCase();
+      if (e[K.idKey] || !k || favs.has(k) || seen.has(k) || (zone && zoneOf(e) !== zone)) continue;
+      seen.set(k, e);
+      if (seen.size === 5) return [...seen.values()];
+    }
+  }
+  return [...seen.values()];
+}
+
+function openPicker(kind, zone = null) {
+  const K = KINDS[kind];
+  if (kind === 'symptoms' && !zone) {
+    picker = null;
+    return openDlg(`<h2>🤒 Quelle zone ?</h2>
+      <div class="grid zones">${ZONES.map(z => `
+        <button type="button" class="tap" data-act="zone" data-zone="${z.id}"><span>${z.emoji}</span>${esc(z.name)}</button>`).join('')}</div>
+      ${closeBar}`, null);
+  }
+  const z = ZONES.find(o => o.id === zone);
+  const favs = active(K.list).filter(x => !z || zoneOf(x) === zone);
+  const rec = recents(kind, zone);
+  picker = { kind, zone, rec };
+  openDlg(`${z ? '<button type="button" class="link" data-act="pick" data-kind="symptoms">‹ Zones</button>' : ''}
+    <h2>${z ? `${z.emoji} ${esc(z.name)}` : `${K.emoji} ${K.title}`}</h2>
+    ${favs.length ? `<div class="grid">${favs.map(x => `
+      <button type="button" class="tap" data-act="pickfav" data-id="${x.id}"><span>${esc(x.emoji)}</span>${esc(x.name)}${x.dose ? `<small>${esc(x.dose)}</small>` : ''}</button>`).join('')}</div>`
+    : `<p class="muted">Aucun favori${z ? ' dans cette zone' : ''} : ajoute-en dans Réglages, ou avec ⭐ sur un récent.</p>`}
+    ${rec.length ? `<h3>Récents</h3>
+      <ul class="list recents">${rec.map((e, i) => `
+        <li><button type="button" class="rec" data-act="pickrec" data-i="${i}"><span class="ico">${esc(e.emoji || K.emoji)}</span>
+            <span class="txt">${esc(e.name)}${e.dose ? ` <small>${esc(e.dose)}</small>` : ''}</span></button>
+          <button type="button" class="chip" data-act="star" data-i="${i}" aria-label="Ajouter aux favoris" title="Ajouter aux favoris">⭐</button></li>`).join('')}</ul>` : ''}
+    <button type="button" class="big" data-act="other">✏️ Autre…</button>
+    ${closeBar}`, null);
+}
+
+// Saisie à partir d'un favori (fav) ou d'un récent ponctuel (rec)
+function pickEntry(kind, { fav, rec }) {
+  const K = KINDS[kind], src = fav || rec;
+  return {
+    ...BLANK[kind],
+    ...(fav ? { [K.idKey]: fav.id } : { name: rec.name, ...(rec.emoji ? { emoji: rec.emoji } : {}) }),
+    ...(kind === 'meds' ? { dose: src.dose || '' } : {}),
+    ...(kind === 'symptoms' ? { zone: zoneOf(src) } : {}),
+  };
+}
+
+// ---------- Rangement des symptômes par zone (symptômes enregistrés avant les zones) ----------
+let zonesAsked = false; // une seule fois par lancement ; « Annuler » = redemander au prochain lancement
+function askZones() {
+  const todo = active('symptoms').filter(s => !s.zone);
+  openDlg(`<h2>🗂️ Range tes symptômes</h2>
+    <p class="muted">Les symptômes sont maintenant classés par zone du corps. Choisis la zone de chacun
+      (modifiable ensuite dans Réglages).</p>
+    ${todo.map(s => `<label>${esc(s.emoji)} ${esc(s.name)}<select name="z-${s.id}">${zoneOptions('general')}</select></label>`).join('')}
+    ${actions(false)}`, fd => {
+    for (const s of todo) s.zone = fd.get('z-' + s.id) || 'general';
     save(); render();
   });
 }
@@ -232,7 +353,11 @@ function openCheckin() {
     <div class="scale">${[1, 2, 3, 4, 5].map(n => `
       <label><input type="radio" name="${name}" value="${n}" ${c[name] === n ? 'checked' : ''}><span>${n}</span></label>`).join('')}</div>
     <div class="ends"><span>${lo}</span><span>${hi}</span></div>`;
-  const acts = db.activities.filter(a => !a.off || c.activities?.includes(a.id));
+  // Les activités notées dans la journée sont cochées d'avance
+  const sports = peek(date).sports || [], done = new Set(sports.map(s => s.actId).filter(Boolean));
+  const isOn = id => c.activities?.includes(id) || done.has(id);
+  const acts = db.activities.filter(a => !a.off || isOn(a.id));
+  const others = sports.filter(s => !s.actId).map(s => { const a = entryLabel('sports', s); return `${a.emoji} ${a.name}`; });
   openDlg(`<h2>🌙 Bilan — ${esc(longDate(date))}</h2>
     <fieldset><legend>😴 Sommeil</legend>
       <label>Durée (heures)<input name="sleepHours" type="number" min="0" max="24" step="0.5" inputmode="decimal" value="${c.sleepHours ?? ''}"></label>
@@ -246,7 +371,8 @@ function openCheckin() {
     </fieldset>
     <fieldset><legend>🏃 Activités</legend>
       <div class="chips">${acts.map(a => `
-        <label><input type="checkbox" name="activities" value="${a.id}" ${c.activities?.includes(a.id) ? 'checked' : ''}><span>${esc(a.emoji)} ${esc(a.name)}</span></label>`).join('')}</div>
+        <label><input type="checkbox" name="activities" value="${a.id}" ${isOn(a.id) ? 'checked' : ''}><span>${esc(a.emoji)} ${esc(a.name)}</span></label>`).join('')}</div>
+      ${others.length ? `<small>Aussi noté dans la journée : ${others.map(esc).join(', ')}</small>` : ''}
     </fieldset>
     <label>Note du jour<textarea name="note" rows="3">${esc(c.note)}</textarea></label>
     ${actions(!!had)}`, (fd, act) => {
@@ -299,7 +425,7 @@ function renderMonth() {
       <span><span class="dot orange"></span>${count.orange} jour(s)</span>
       <span><span class="dot red"></span>${count.red} jour(s)</span>
     </p>
-    <p class="muted">Vert : aucun symptôme · orange : 1 à 2 · rouge : 3 et plus. ✎ : couleur choisie à la main.
+    <p class="muted">Vert : 0 à 2 symptômes · orange : 3 à 4 · rouge : 5 et plus. ✎ : couleur choisie à la main.
       Touche un jour pour voir son détail ou changer sa couleur.</p>`;
 }
 
@@ -310,17 +436,27 @@ const LISTS = {
   activities: { title: 'Activités', ex: 'Natation', emoji: '🏃' },
 };
 
+// Même groupe pour le tri « ↑ » : même liste, et même zone pour les symptômes
+const sameGroup = (k, a, b) => k !== 'symptoms' || zoneOf(a) === zoneOf(b);
+
+function settingsList(k, items) {
+  return `<ul class="list">${items.map((x, i) => `
+    <li class="li-item"><span class="ico">${esc(x.emoji)}</span>
+      <span class="name">${esc(x.name)}${x.dose ? ` <small>${esc(x.dose)}</small>` : ''}</span>
+      <button class="chip" data-act="up" data-list="${k}" data-id="${x.id}" ${i ? '' : 'disabled'} aria-label="Monter">↑</button>
+      <button class="chip" data-act="rename" data-list="${k}" data-id="${x.id}" aria-label="Modifier">✏️</button>
+      <button class="chip" data-act="remove" data-list="${k}" data-id="${x.id}" aria-label="Retirer">🗑</button>
+    </li>`).join('') || '<li class="muted">Liste vide</li>'}</ul>`;
+}
+
 function renderSettings() {
   $('#v-settings').innerHTML = Object.entries(LISTS).map(([k, L]) => `
     <h2>${L.title}</h2>
-    <ul class="list">${active(k).map((x, i) => `
-      <li class="li-item"><span class="ico">${esc(x.emoji)}</span>
-        <span class="name">${esc(x.name)}${x.dose ? ` <small>${esc(x.dose)}</small>` : ''}</span>
-        <button class="chip" data-act="up" data-list="${k}" data-id="${x.id}" ${i ? '' : 'disabled'} aria-label="Monter">↑</button>
-        <button class="chip" data-act="rename" data-list="${k}" data-id="${x.id}" aria-label="Modifier">✏️</button>
-        <button class="chip" data-act="remove" data-list="${k}" data-id="${x.id}" aria-label="Retirer">🗑</button>
-      </li>`).join('') || '<li class="muted">Liste vide</li>'}</ul>
+    ${k === 'symptoms'
+      ? ZONES.map(z => `<h3>${z.emoji} ${esc(z.name)}</h3>${settingsList(k, active(k).filter(x => zoneOf(x) === z.id))}`).join('')
+      : settingsList(k, active(k))}
     <form class="bar addform" data-list="${k}">
+      ${k === 'symptoms' ? `<select name="zone" class="zone" aria-label="Zone">${zoneOptions('general')}</select>` : ''}
       <input name="emoji" class="emoji" placeholder="${L.emoji}" aria-label="Emoji">
       <input name="name" placeholder="${L.ex}" required aria-label="Nom">
       ${k === 'meds' ? '<input name="dose" class="dose" placeholder="Dose" aria-label="Dose">' : ''}
@@ -341,18 +477,31 @@ function editItem(k, x) {
     <div class="row"><label class="emoji-l">Emoji<input name="emoji" value="${esc(x.emoji)}"></label>
       <label>Nom<input name="name" value="${esc(x.name)}" required></label></div>
     ${k === 'meds' ? `<label>Dose habituelle<input name="dose" value="${esc(x.dose)}"></label>` : ''}
+    ${k === 'symptoms' ? `<label>Zone<select name="zone">${zoneOptions(zoneOf(x))}</select></label>` : ''}
     ${actions(false)}`, fd => {
     x.emoji = fd.get('emoji').trim() || LISTS[k].emoji;
     x.name = fd.get('name').trim() || x.name;
     if (k === 'meds') x.dose = fd.get('dose').trim();
+    if (k === 'symptoms') x.zone = fd.get('zone');
     save(); render();
   });
+}
+
+// Ajoute à une liste des Réglages ; même nom qu'un élément retiré : on le réactive (son historique reste lié)
+function addToList(k, { name, emoji, dose = '', zone }) {
+  const extra = k === 'meds' ? { dose } : k === 'symptoms' ? { zone: zone || 'general' } : {};
+  const old = db[k].find(o => o.name.toLowerCase() === name.toLowerCase());
+  if (old) Object.assign(old, { off: false, emoji }, extra);
+  else db[k].push({ id: uid(), name, emoji, ...extra });
 }
 
 // ---------- Navigation ----------
 const VIEWS = { day: renderDay, month: renderMonth, settings: renderSettings };
 let view = 'day';
-function render() { VIEWS[view](); }
+function render() {
+  VIEWS[view]();
+  if (!zonesAsked && !$('#dlg').open && active('symptoms').some(s => !s.zone)) { zonesAsked = true; askZones(); }
+}
 function go(v) {
   view = v;
   for (const s of document.querySelectorAll('.view')) s.hidden = s.id !== 'v-' + v;
@@ -384,8 +533,25 @@ document.addEventListener('click', e => {
     case 'today': cur = null; return render();
     case 'color': return openColor();
     case 'checkin': return openCheckin();
-    case 'addsym': return addEntry('symptoms', { typeId: id, context: '' });
-    case 'addmed': return addEntry('meds', { medId: id, dose: item('meds', id).dose || '', note: '' });
+    case 'pick': return openPicker(t.dataset.kind);
+    case 'zone': return openPicker('symptoms', t.dataset.zone);
+    case 'pickfav':
+    case 'pickrec': {
+      const { kind, rec } = picker, K = KINDS[kind];
+      $('#dlg').close();
+      return addEntry(kind, pickEntry(kind, t.dataset.act === 'pickfav' ? { fav: item(K.list, id) } : { rec: rec[t.dataset.i] }));
+    }
+    case 'star': {
+      const { kind, zone, rec } = picker, r = rec[t.dataset.i], K = KINDS[kind];
+      addToList(K.list, { name: r.name, emoji: r.emoji || K.emoji, dose: r.dose, zone: zoneOf(r) });
+      save(); render();
+      toast(`⭐ ${r.name} ajouté aux favoris`);
+      return openPicker(kind, zone);
+    }
+    case 'other': {
+      const { kind, zone } = picker;
+      return openEdit(day(), kind, null, { id: uid(), time: cur ? '12:00' : nowTime(), name: '', ...BLANK[kind], ...(zone ? { zone } : {}) });
+    }
     case 'addstool': return openEdit(day(), 'stools', null, { id: uid(), time: cur ? '12:00' : nowTime(), bristol: null, note: '' });
     case 'edit': return openEdit(day(), t.dataset.kind, id);
     case 'dlgclose': return $('#dlg').close();
@@ -398,7 +564,7 @@ document.addEventListener('click', e => {
     case 'openday': setDay(t.dataset.date); return go('day');
     case 'up': {
       const arr = db[list], i = arr.indexOf(x);
-      const j = arr.slice(0, i).findLastIndex(o => !o.off);
+      const j = arr.slice(0, i).findLastIndex(o => !o.off && sameGroup(list, o, x));
       if (j >= 0) [arr[i], arr[j]] = [arr[j], arr[i]];
       break;
     }
@@ -419,11 +585,10 @@ document.addEventListener('submit', e => {
   const k = f.dataset.list, name = f.elements.name.value.trim();
   if (!name) return;
   const emoji = f.elements.emoji.value.trim() || LISTS[k].emoji, dose = f.elements.dose?.value.trim() || '';
-  // Même nom qu'un élément retiré : on le réactive (son historique reste lié)
-  const old = db[k].find(o => o.name.toLowerCase() === name.toLowerCase());
-  if (old) Object.assign(old, { off: false, emoji }, k === 'meds' ? { dose } : {});
-  else db[k].push({ id: uid(), name, emoji, ...(k === 'meds' ? { dose } : {}) });
+  const zone = f.elements.zone?.value;
+  addToList(k, { name, emoji, dose, zone });
   save(); render();
+  if (zone) $(`.addform[data-list="${k}"] [name="zone"]`).value = zone; // garde la zone pour l'ajout suivant
   $(`.addform[data-list="${k}"] [name="name"]`)?.focus();
 });
 
