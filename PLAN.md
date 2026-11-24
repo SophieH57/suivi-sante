@@ -43,6 +43,9 @@ Usage personnel, une seule utilisatrice, téléphone Android.
 
 ### 4. Réglages
 - Listes modifiables : symptômes, médicaments, types d'activité (ajout, renommage, ordre, emoji).
+- Propositions par défaut : activités (yoga, zumba, course, marche, elliptique, vélo d'appartement) et
+  médicaments (Paracétamol, Spasfon, Smecta, Gaviscon, sans dose). Ajoutées une seule fois par compte
+  (`seeds`, synchronisé) : un médicament par défaut retiré ne revient pas.
 - Symptômes rangés par zone (une zone par symptôme). Les symptômes enregistrés avant les zones
   sont rangés au premier lancement (fenêtre de choix ; sans réponse : Général, redemandé au lancement suivant).
 - Connexion Google (sauvegarde en ligne).
@@ -62,7 +65,7 @@ Stockage local : un objet JSON dans `localStorage`.
 Firestore (même principe que `library`) :
 
 ```
-users/{uid}                  → listes : symptoms [{ id, name, emoji, zone }], meds, activities
+users/{uid}                  → listes : symptoms [{ id, name, emoji, zone }], meds, activities, seeds
 users/{uid}/days/{AAAA-MM-JJ} → tout ce qui concerne un jour :
   symptoms: [{ id, typeId, zone, time, context }]
   meds:     [{ id, medId, time, dose, note }]

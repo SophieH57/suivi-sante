@@ -9,7 +9,7 @@ const FB = 'https://www.gstatic.com/firebasejs/12.19.0/';
 const cloud = { user: null, status: '', ready: false, synced: {}, fs: null, unsub: [] };
 
 const dayDocs = () => Object.fromEntries(Object.entries(db.days).map(([k, d]) => [k, JSON.stringify(d)]));
-const metaDoc = () => JSON.stringify({ symptoms: db.symptoms, meds: db.meds, activities: db.activities });
+const metaDoc = () => JSON.stringify({ symptoms: db.symptoms, meds: db.meds, activities: db.activities, seeds: db.seeds || [] });
 const saveLocal = () => localStorage.setItem(KEY, JSON.stringify(db));
 
 function cloudHtml() {
@@ -50,6 +50,19 @@ function push() {
   }
 }
 
+// Listes reçues de la copie en ligne
+function applyMeta(d) {
+  const zones = new Map(db.symptoms.filter(s => s.zone).map(s => [s.id, s.zone]));
+  db.symptoms = d.symptoms || db.symptoms;
+  db.meds = d.meds || db.meds;
+  db.activities = d.activities || db.activities;
+  db.seeds = d.seeds || [];
+  cloud.synced._meta = metaDoc(); // état en ligne : ce qui suit est envoyé au prochain push
+  // Une zone ne peut pas être enlevée : sans zone en ligne = copie plus ancienne que le classement fait ici
+  for (const s of db.symptoms) if (!s.zone && zones.has(s.id)) s.zone = zones.get(s.id);
+  seedDefaults(); // compte jamais complété : ajout ici
+}
+
 function listen(uid) {
   const { doc, collection, onSnapshot } = cloud.fs;
   // Prêt à envoyer seulement quand les deux copies en ligne sont arrivées (sinon un nouveau
@@ -57,14 +70,7 @@ function listen(uid) {
   const waiting = new Set(['meta', 'days']);
   const arrived = k => { if (waiting.delete(k) && !waiting.size) { cloud.ready = true; push(); } };
   cloud.unsub.push(onSnapshot(doc(cloud.db, `users/${uid}`), snap => {
-    if (!snap.metadata.hasPendingWrites && snap.exists()) {
-      const d = snap.data();
-      db.symptoms = d.symptoms || db.symptoms;
-      db.meds = d.meds || db.meds;
-      db.activities = d.activities || db.activities;
-      cloud.synced._meta = metaDoc();
-      saveLocal(); render();
-    }
+    if (!snap.metadata.hasPendingWrites && snap.exists()) { applyMeta(snap.data()); saveLocal(); render(); }
     arrived('meta');
   }));
   cloud.unsub.push(onSnapshot(collection(cloud.db, `users/${uid}/days`), { includeMetadataChanges: true }, snap => {

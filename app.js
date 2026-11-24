@@ -19,8 +19,25 @@ const EMPTY = {
   //                  stools: [{ id, bristol, time, note }], checkin: {…} | null, color: null | 'green' | 'orange' | 'red' }
   // Saisie ponctuelle (hors liste des Réglages) : pas de typeId / medId / actId, mais { name, emoji? } dans la saisie.
   days: {},
+  seeds: [], // propositions par défaut déjà ajoutées aux listes (une seule fois, même si on les retire ensuite)
 };
 let db = load();
+
+const DEFAULT_MEDS = [
+  { name: 'Paracétamol', emoji: '💊' },
+  { name: 'Spasfon', emoji: '💊' },
+  { name: 'Smecta', emoji: '🥛' },
+  { name: 'Gaviscon', emoji: '🧴' },
+];
+// Ajoute les médicaments par défaut absents de la liste (même nom = déjà là, même retiré). true si db a changé.
+function seedDefaults() {
+  if (db.seeds?.includes('meds-v1')) return false;
+  for (const m of DEFAULT_MEDS)
+    if (!db.meds.some(o => o.name.toLowerCase() === m.name.toLowerCase()))
+      db.meds.push({ id: 'def-' + m.name.toLowerCase().normalize('NFD').replace(/[^a-z]/g, ''), ...m, dose: '' });
+  db.seeds = [...(db.seeds || []), 'meds-v1'];
+  return true;
+}
 
 function load() {
   try { return { ...structuredClone(EMPTY), ...JSON.parse(localStorage.getItem(KEY)) }; } catch { return structuredClone(EMPTY); }
@@ -341,7 +358,8 @@ function askZones() {
       (modifiable ensuite dans Réglages).</p>
     ${todo.map(s => `<label>${esc(s.emoji)} ${esc(s.name)}<select name="z-${s.id}">${zoneOptions('general')}</select></label>`).join('')}
     ${actions(false)}`, fd => {
-    for (const s of todo) s.zone = fd.get('z-' + s.id) || 'general';
+    // Relire la liste actuelle : la copie en ligne a pu la remplacer pendant que la fenêtre était ouverte
+    for (const s of db.symptoms) { const z = fd.get('z-' + s.id); if (z && !s.zone) s.zone = z; }
     save(); render();
   });
 }
@@ -601,13 +619,14 @@ document.addEventListener('change', async e => {
     const d = JSON.parse(text);
     if (!d.days || !d.symptoms) throw 0;
     if (!confirm('Remplacer toutes les données actuelles par cette sauvegarde ?')) return;
-    db = { ...structuredClone(EMPTY), ...d }; save(); render();
+    db = { ...structuredClone(EMPTY), ...d }; seedDefaults(); save(); render();
   } catch { alert('Fichier de sauvegarde invalide.'); }
 });
 
 // Appli restée ouverte : à la reprise, « aujourd'hui » peut avoir changé
 document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
 
+if (seedDefaults()) save();
 render();
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
